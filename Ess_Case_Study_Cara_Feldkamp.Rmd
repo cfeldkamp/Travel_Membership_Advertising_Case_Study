@@ -1,0 +1,452 @@
+---
+title: "Travel Membership Advertising Case Study"
+author: "Cara Feldkamp"
+date: "May 12, 2019"
+output: powerpoint_presentation
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+library(stats)
+library(dplyr)
+library(ggplot2)
+library(survey)
+library(jtools)
+library(huxtable)
+library(reshape2)
+library(sqldf)
+
+impressions <- read.csv('/Applications/DbVisualizer-8.0.12.app/Contents/Imports/IMPRESSIONS.csv')
+placements <- read.csv('/Applications/DbVisualizer-8.0.12.app/Contents/Imports/PLACEMENTS.csv')
+ads <- read.csv('/Applications/DbVisualizer-8.0.12.app/Contents/Imports/ADS.csv')
+activity <- read.csv('/Applications/DbVisualizer-8.0.12.app/Contents/Imports/ACTIVITY.csv')
+market <- read.csv('/Applications/DbVisualizer-8.0.12.app/Contents/Imports/MARKET.csv')
+os <- read.csv('/Applications/DbVisualizer-8.0.12.app/Contents/Imports/OS.csv')
+site <- read.csv('/Applications/DbVisualizer-8.0.12.app/Contents/Imports/SITE.csv')
+audience <- read.csv('/Applications/DbVisualizer-8.0.12.app/Contents/Imports/AUDIENCE.csv')
+
+```
+
+
+## Topline Metrics
+
+- Between October 1,2017 and January 1, 2018, we served **160,097 impressions.**
+
+- The **43,709 unique users (cookies)** we identified were served **158,380 impressions**, for an average of **3.6 impressions per user**
+
+- **429 users (0.98%)** were converted
+
+```{r, echo = FALSE, cache=TRUE, eval=FALSE}
+(429/43709)*100
+
+```
+
+## Topline Metrics
+
+- Of the users we converted, about **40% were converted postclick** and about **60% were converted postview.**
+
+```{r, echo = FALSE, cache=TRUE, eval=FALSE}
+#Postclick
+(171/429)*100
+  
+#Postview
+(258/429)*100
+
+```
+
+## Sites
+
+- We served our ads across 15 different websites
+- The vast majority were served to users via Programmatic DSP
+
+```{r, echo = FALSE, cache=TRUE}
+imp_by_site <- sqldf("select s.site_category,count(i.user_id) as imp
+from impressions i
+left join placements p using(placement_id)
+left join site s using(site_id)
+group by 1
+      ")
+
+graph_imp_site <- ggplot(imp_by_site,aes(x=reorder(Site_category, imp), y=imp, label=imp)) + geom_col(fill="dodgerblue") + scale_y_continuous(expand = expand_scale(mult = c(0, 0.1), add = c(0, 1))) + labs(x="", y="Impressions") + geom_text(color="black",hjust=-0.2,size=3) + coord_flip() + theme_light() + theme(axis.title=element_text(face="bold"),plot.title = element_text(face="bold",hjust=0.5)) 
+
+plot(graph_imp_site)
+```
+
+## Sites
+
+- However, we saw the highest conversion rates on **travel and weather sites**
+
+```{r, echo=FALSE, cache=TRUE}
+
+#Some users who were converted were served an ad at the exact same time, but with different placements, so I had to pull out the conversion info this way
+
+conversions <- sqldf("select user_id, placement_id, ad_id, operating_system_id, market_id, creative_id, audience_id, event_sub_type,site_id, site_category
+from (
+select user_id,impression_time,placement_id, ad_id, operating_system_id, market_id,creative_id
+from (
+select user_id, max(impression_time) as impression_time
+from impressions i
+where user_id not like '0'
+group by 1
+order by 1,2
+) a
+left join (
+        select user_id, impression_time, placement_id, ad_id, operating_system_id, market_id,creative_id
+        from impressions
+        group by 1,2,3,4,5,6,7
+) b using(user_id, impression_time)
+group by 1,2,3,4,5,6,7
+order by 1,2,3
+) c
+inner join activity act using(user_id, placement_id,ad_id,creative_id)
+left join placements p using(placement_id)
+left join site s using(site_id)
+group by 1,2,3,4,5,6,7,8,9,10
+      ")
+
+conversions2 <- sqldf("select Site_category, count(user_id) as conversions
+from conversions
+group by 1
+      ")
+
+
+pct_conversions <- sqldf("select Site_category, imp, conversions, cast(((cast(conversions as float)/cast(imp as float))*100) as float) as pct_conv
+from imp_by_site a
+left join conversions2 using(Site_category)
+group by 1,2,3,4
+order by 4 desc
+      ")
+
+graph_site_cat_conv_rate <- ggplot(data=pct_conversions, aes(x=reorder(Site_category, pct_conv),y=pct_conv, label=paste(round(pct_conv,2),"%",sep=""))) + geom_col(fill="salmon") + scale_y_continuous(expand = expand_scale(mult = c(0, 0.1), add = c(0, 0))) + labs(x="", y="Conversion Rate (%)") + geom_text(color="black",hjust=-0.2,size=3) + coord_flip() + theme_light() +  theme(axis.title=element_text(face="bold"),plot.title = element_text(face="bold",hjust=0.5)) 
+
+plot(graph_site_cat_conv_rate)
+
+#graph_site_conv_rate <- ggplot(data=conversions, aes(x=reorder(Site_id, pct_conv=),y=pct_conv, label=paste(round(pct_conv,2),"%",sep=""))) + geom_col(fill="salmon") + scale_y_continuous(expand = expand_scale(mult = c(0, 0.1), add = c(0, 0))) + labs(x="", y="Conversion Rate (%)") + geom_text(color="black",hjust=-0.2,size=3) + coord_flip() + theme_light() +  theme(axis.title=element_text(face="bold"),plot.title = element_text(face="bold",hjust=0.5)) 
+
+#plot(graph_site_conv_rate)
+
+```
+
+```{r, echo=FALSE, cache=TRUE}
+
+conversions_site_cpm <- sqldf("select site_category,site_id, user_id as imp, cast(substr(cpm,-5) as float) as cpm
+from conversions c
+left join placements p using(placement_id, site_id)
+      ")
+
+ggplot(data=conversions_site_cpm, aes(x=reorder(Site_id, cpm),y=cpm, color=Site_category, fill=Site_category)) + geom_boxplot() + scale_fill_hue(c=45, l=85) + scale_colour_hue(l=50) + labs(x="Site ID", y="CPM ($)", fill="Site Category", color="Site Category") + theme_light() + theme(axis.title=element_text(face="bold"),axis.text.x=element_text(angle=45,hjust=1),legend.title=element_text(face="bold"),plot.title = element_text(face="bold",hjust=0.5)) 
+
+```
+
+## Ad Type
+
+```{r, echo=FALSE, cache=TRUE}
+
+ad_convs <- sqldf("select ad_id, Event_sub_type,count(user_id) as conv
+from conversions
+where ad_id in (
+select ad_id
+from (
+  select ad_id,count(user_id) as imp_total
+  from conversions
+  group by 1) a
+where imp_total>=10
+group by 1
+)
+group by 1,2
+      ")
+
+graph_pct_of_conv <- ggplot(data=ad_convs, aes(x=reorder(as.character(ad_id),conv), y=conv, fill=Event_sub_type, label=conv)) + geom_col(position="fill") + theme_light() + coord_flip() + labs(x="Ad ID", y="% of Conversions", fill="Converted") + geom_text(position = position_fill(vjust=0.5))
+
+plot(graph_pct_of_conv)
+
+```
+
+## Ad Type
+
+- 64 out of 233 ads converted a user: **a rate of 27.5%**
+- **Video ads** had the highest conversion rate
+- Ad size and video length generally did not seem to impact conversion rates, apart from a **3.58% conversion rate for the largest size of Rich Media ads** (17 out of 475)
+
+```{r, echo=FALSE, cache=TRUE}
+
+imp_by_ad <- sqldf("select i.*,a.*
+from impressions i
+left join ads a using(ad_id)
+                   ")
+
+ad_conv_rate <- sqldf("select i.ad_id,count(i.user_id) as imp, count(c.user_id) as conv,cast(((cast(count(c.user_id) as float)/cast(count(i.user_id) as float))*100) as float) as pct_conv
+from imp_by_ad i
+left join (select user_id, ad_id, placement_id
+        from conversions) c on i.ad_id=c.ad_id and i.user_id=c.user_id and i.placement_id=c.placement_id
+group by 1
+order by 4 desc
+      ")
+
+# Finding overall ad conversion rate
+#sqldf("select count(ad_id) as all_ads,count(case when conv>0 then ad_id else null end) as converted_ads from ad_conv_rate")
+
+#(64/233)*100
+
+
+ad_format_conv_rate <- sqldf("select ad_format, sum(imp) as imp, sum(conv) as conv,cast(((cast(sum(conv) as float)/cast(sum(imp) as float))*100) as float) as pct_conv
+from (
+select i.ad_id,i.ad_size,i.ad_format,i.marketing_goal,count(i.user_id) as imp, count(c.user_id) as conv
+from imp_by_ad i
+left join (select user_id, ad_id, placement_id
+        from conversions) c on i.ad_id=c.ad_id and i.user_id=c.user_id and i.placement_id=c.placement_id
+group by 1,2,3,4
+) a
+group by 1
+order by 4 desc
+      ")
+
+
+graph_ad_format <- ggplot(ad_format_conv_rate,aes(x=ad_format, y=pct_conv, label=paste(round(pct_conv,2),"%",sep=""))) + geom_col(fill="springgreen3") + scale_y_continuous(expand = expand_scale(mult = c(0, 0.1), add = c(0, .1))) + labs(x="", y="Conversion Rate (%)") + geom_text(color="black",hjust=-0.2,size=3) + coord_flip() + theme_light() + theme(axis.title=element_text(face="bold"),plot.title = element_text(face="bold",hjust=0.5)) 
+
+plot(graph_ad_format)
+```
+
+```{r, echo=FALSE, cache=TRUE}
+
+ad_conv_rate_size_format <- sqldf("select ad_format, ad_size, sum(imp) as imp, sum(conv) as conv,cast(((cast(sum(conv) as float)/cast(sum(imp) as float))*100) as float) as pct_conv
+from (
+select i.ad_id,i.ad_size,i.ad_format,i.marketing_goal,count(i.user_id) as imp, count(c.user_id) as conv
+from imp_by_ad i
+left join (select user_id, ad_id, placement_id
+        from conversions) c on i.ad_id=c.ad_id and i.user_id=c.user_id and i.placement_id=c.placement_id
+group by 1,2,3,4
+) a
+group by 1,2
+order by 5 desc
+      ")
+
+
+graph_ad_size_format <- ggplot(ad_conv_rate_size_format,aes(x=ad_format, y=pct_conv, label=paste(round(pct_conv,2),"%",sep=""))) + geom_col(fill="springgreen3") + scale_y_continuous(expand = expand_scale(mult = c(0, 0.1), add = c(0, 1))) + labs(x="", y="Conversion Rate (%)") + geom_text(color="black",hjust=-0.2,size=3) + coord_flip() + theme_light() + theme(axis.title=element_text(face="bold"),plot.title = element_text(face="bold",hjust=0.5)) + facet_wrap(facets=vars(ad_size))
+
+plot(graph_ad_size_format)
+```
+
+## Ad Type
+- Overall, **ads focused on brand awareness were more successful** than "call to action" ads
+- Brand awareness ads: **0.94% conversion rate**
+- "Call to action" ads: **0.61% conversion rate**
+- Our ads were about 57% brand awareness, 43% "call to action"
+- We spread our brand awareness ads across all formats, and limited the "call to action" ads to standard format and rich media
+- Brand awareness ads yielded far more conversions in rich media format than "call to action" ads did
+
+```{r, echo=FALSE, cache=TRUE}
+
+ad_conv_rate_marketing <- sqldf("select marketing_goal, ad_format,sum(imp) as imp, sum(conv) as conv,cast(((cast(sum(conv) as float)/cast(sum(imp) as float))*100) as float) as pct_conv
+from (
+select i.ad_id,i.ad_size,i.ad_format,i.marketing_goal,count(i.user_id) as imp, count(c.user_id) as conv
+from imp_by_ad i
+left join (select user_id, ad_id, placement_id
+        from conversions) c on i.ad_id=c.ad_id and i.user_id=c.user_id and i.placement_id=c.placement_id
+group by 1,2,3,4
+) a
+group by 1,2
+order by 5 desc
+      ")
+
+
+graph_ad_format_marketing <- ggplot(ad_conv_rate_marketing,aes(x=ad_format, y=pct_conv,fill=marketing_goal, label=paste(round(pct_conv,2),"%",sep=""))) + geom_col(position=position_dodge(preserve="single"), width=0.8) + scale_y_continuous(expand = expand_scale(mult = c(0, 0.1), add = c(0, .1))) + labs(x="", y="Conversion Rate (%)", fill="Marketing Goal") + coord_flip() + theme_light() + theme(axis.title=element_text(face="bold"),plot.title = element_text(face="bold",hjust=0.5)) #+geom_text(color="black",size=3,hjust=-0.2, vjust=0.5) 
+
+plot(graph_ad_format_marketing)
+```
+
+```{r, echo=FALSE, cache=TRUE}
+
+conversions_cpm_ads <- sqldf("select ad_id,ad_format,prog_sub_buy_type,user_id as imp, cast(substr(cpm,-5) as float) as cpm
+from conversions c
+left join placements p using(placement_id)
+left join ads a using(ad_id)
+      ")
+
+graph_conv_ad_cpm <- ggplot(data=conversions_cpm_ads, aes(x=reorder(Ad_format, cpm),y=cpm, color=Prog_sub_buy_type
+, fill=Prog_sub_buy_type)) + geom_boxplot() + scale_fill_hue(c=45, l=85) + scale_colour_hue(l=50) + labs(x="Ad Format", y="CPM ($)", fill="Buy Type", color="Buy Type") + theme_light() + theme(axis.title=element_text(face="bold"),axis.text.x=element_text(angle=45,hjust=1),legend.title=element_text(face="bold"),plot.title = element_text(face="bold",hjust=0.5)) 
+plot(graph_conv_ad_cpm)
+```
+
+## Audience
+
+- Our ads were largely aimed at **young professionals**, followed by **frequent travelers**
+-These two groups also had the highest conversion rates at **1.03%** and **0.95%**, respectively
+
+```{r, echo=FALSE, cache=TRUE}
+
+imp_by_audience <- sqldf("select i.*,a.*, p.*, m.*, o.*
+from impressions i
+left join placements p using(placement_id)
+left join market m using(market_id)
+left join os o on i.operating_system_id=o.os_id
+left join audience a using(audience_id)
+                   ")
+
+audience_conv_rate <- sqldf("select i.audience_name,count(i.user_id) as imp, count(c.user_id) as conv,cast(((cast(count(c.user_id) as float)/cast(count(i.user_id) as float))*100) as float) as pct_conv
+from imp_by_audience i
+left join (select user_id, ad_id, placement_id
+        from conversions) c on i.ad_id=c.ad_id and i.user_id=c.user_id and i.placement_id=c.placement_id
+group by 1
+order by 4 desc
+      ")
+
+graph_aud_conv <- ggplot(audience_conv_rate,aes(x=reorder(Audience_name,conv), y=conv, label=imp)) + geom_col(fill="plum2") + scale_y_continuous(expand = expand_scale(mult = c(0, 0.1), add = c(0, .1))) + labs(x="", y="Conversions") + geom_text(color="black",hjust=-0.2,size=3) + coord_flip() + theme_light() + theme(axis.title=element_text(face="bold"),plot.title = element_text(face="bold",hjust=0.5)) 
+
+plot(graph_aud_conv)
+
+graph_audience <- ggplot(audience_conv_rate,aes(x=reorder(Audience_name,pct_conv), y=pct_conv, label=paste(round(pct_conv,2),"%",sep=""))) + geom_col(fill="purple3") + scale_y_continuous(expand = expand_scale(mult = c(0, 0.1), add = c(0, .1))) + labs(x="", y="Conversion Rate (%)") + geom_text(color="black",hjust=-0.2,size=3) + coord_flip() + theme_light() + theme(axis.title=element_text(face="bold"),plot.title = element_text(face="bold",hjust=0.5)) 
+
+plot(graph_audience)
+
+```
+
+## Audience
+
+- We are seeing the most conversions and fairly high conversion rates from impressions served to **Young Professionals and Frequent Travelers** on **mobile devices** and via **Real-Time Bidding.**
+- However, there may be some other opportunities for growth, especially among:
+  - Young Professionals served impressions via Private Marketplace on news and Programmatic DSP sites
+  - Frequent Travelers on social media sites
+  - Adventure Junkies on news sites, and 
+  - Young Professionals and Retirees via Programmatic Guarantee on travel sites
+
+```{r}
+audience_conv_rate_os <- sqldf("select i.audience_name,i.channel,s.site_category,count(i.user_id) as imp, count(c.user_id) as conv,cast(((cast(count(c.user_id) as float)/cast(count(i.user_id) as float))*100) as float) as pct_conv
+from imp_by_audience i
+left join (select user_id, ad_id, placement_id, site_category
+        from conversions) c on i.ad_id=c.ad_id and i.user_id=c.user_id and i.placement_id=c.placement_id
+left join site s using(site_id)
+group by 1,2,3
+order by 6 desc
+      ")
+
+graph_audience_rast <- ggplot(audience_conv_rate_os,aes(x=Audience_name, y=Site_category,fill=conv, label=paste(round(pct_conv,2),"%",sep=""))) + geom_raster() + labs(x="Audience", y="Site Category",fill="Conversions") + scale_fill_distiller(palette="Greens", direction=1) + geom_text(size=3) + theme_light() + theme(axis.title=element_text(face="bold"),plot.title = element_text(face="bold",hjust=0.5),axis.text.x=element_text(angle=45,hjust=1)) + facet_wrap(facets=vars(Channel))
+
+plot(graph_audience_rast)
+
+
+audience_conv_rate_buy <- sqldf("select i.audience_name,i.prog_sub_buy_type,s.site_category,count(i.user_id) as imp, count(c.user_id) as conv,cast(((cast(count(c.user_id) as float)/cast(count(i.user_id) as float))*100) as float) as pct_conv
+from imp_by_audience i
+left join (select user_id, ad_id, placement_id, site_category
+        from conversions) c on i.ad_id=c.ad_id and i.user_id=c.user_id and i.placement_id=c.placement_id
+left join site s using(site_id)
+group by 1,2,3
+order by 6 desc
+      ")
+
+
+graph_audience_rast2 <- ggplot(audience_conv_rate_buy,aes(x=Audience_name, y=Site_category,fill=conv, label=paste(round(pct_conv,2)," ",sep=""))) + geom_raster() + labs(x="Audience", y="Site Category",fill="Conversions") + scale_fill_distiller(palette="Blues", direction=1) + geom_text(size=3) + theme_light() + theme(axis.title=element_text(face="bold"),plot.title = element_text(face="bold",hjust=0.5),axis.text.x=element_text(angle=45,hjust=1)) + facet_wrap(facets=vars(Prog_sub_buy_type))
+
+plot(graph_audience_rast2)
+```
+
+## Audience
+
+- **Young Professionals** and the majority of **Freqent Travelers** - our two largest sources of new members - are relatively **inexpensive to convert** compared to retirees and Amtrak riders.  
+
+```{r,echo=FALSE,cache=TRUE}
+audience_cpm <- sqldf("select i.audience_name,cast(substr(i.cpm,-5) as float) as cpm,s.site_category,user_id as imp, case when c.user_id is not null then 'Conversion' else 'No Conversion' end as conv
+from imp_by_audience i
+left join (select user_id, ad_id, placement_id
+        from conversions) c using(user_id,placement_id)
+left join site s using(site_id)
+      ")
+
+graph_audience_cost <- ggplot(audience_cpm,aes(x=Audience_name, y=cpm, fill=conv)) + geom_boxplot()  + theme_light() + theme(axis.title=element_text(face="bold"),plot.title = element_text(face="bold",hjust=0.5),axis.text.x=element_text(angle=45,hjust=1)) + labs(x="Audience",y="CPM ($)", fill="")
+
+plot(graph_audience_cost)
+
+
+```
+
+
+
+## Audience
+
+- Our analysis by media market indicates that we had the highest conversion rates in small cities in the Midwest and Mountain West
+- Even when looking at the raw number of conversions, some of these small cities ranked fairly high:
+  - Rapid City, SD
+  - Reno, NV
+  - Wichita, KS
+  - Butte/Bozeman, MT
+
+```{r, echo=FALSE, cache=TRUE}
+
+market_conv_rate <- sqldf("select market, imp, conv, pct_conv
+from (
+select i.market,count(i.user_id) as imp, count(c.user_id) as conv,cast(((cast(count(c.user_id) as float)/cast(count(i.user_id) as float))*100) as float) as pct_conv
+from imp_by_audience i
+left join (select user_id, ad_id, placement_id
+        from conversions) c on i.ad_id=c.ad_id and i.user_id=c.user_id and i.placement_id=c.placement_id
+group by 1
+order by 4 desc
+) a
+where conv>=10
+and pct_conv>0
+and market not like 'NA'
+      ")
+
+state_conv_rate <- sqldf("select state, imp, conv, pct_conv
+from (
+select case when substr(i.market,-2) like 'D)' then 'MD' else substr(i.market,-2) end as state
+,count(i.user_id) as imp, count(c.user_id) as conv,cast(((cast(count(c.user_id) as float)/cast(count(i.user_id) as float))*100) as float) as pct_conv
+from imp_by_audience i
+left join (select user_id, ad_id, placement_id
+        from conversions) c on i.ad_id=c.ad_id and i.user_id=c.user_id and i.placement_id=c.placement_id
+group by 1
+order by 4 desc
+) a 
+where state not like 'NA'
+and pct_conv>0
+and conv>=10
+      ")
+
+graph_market_rate <- ggplot(market_conv_rate,aes(x=reorder(market,pct_conv), y=pct_conv, label=paste(round(pct_conv,2),"%",sep=""))) + geom_col(fill="cornflowerblue") + scale_y_continuous(expand = expand_scale(mult = c(0, 0.1), add = c(0, .4))) + labs(x="", y="Conversion Rate (%)") + geom_text(color="black",hjust=-0.2,size=3) + coord_flip() + theme_light() + theme(axis.title=element_text(face="bold"),plot.title = element_text(face="bold",hjust=0.5)) 
+
+plot(graph_market_rate)
+
+graph_market_raw <- ggplot(market_conv_rate,aes(x=reorder(market,conv), y=conv, label=conv)) + geom_col(fill="mediumblue") + scale_y_continuous(expand = expand_scale(mult = c(0, 0.1), add = c(0, .2))) + labs(x="", y="Conversions") + geom_text(color="black",hjust=-0.2,size=3) + coord_flip() + theme_light() + theme(axis.title=element_text(face="bold"),plot.title = element_text(face="bold",hjust=0.5)) 
+
+plot(graph_market_raw)
+
+
+graph_state_rate <- ggplot(state_conv_rate,aes(x=reorder(state,pct_conv), y=pct_conv, label=paste(round(pct_conv,2),"%",sep=""))) + geom_col(fill="gold2") + scale_y_continuous(expand = expand_scale(mult = c(0, 0.1), add = c(0, .1))) + labs(x="", y="Conversion Rate (%)") + geom_text(color="black",hjust=-0.2,size=3) + coord_flip() + theme_light() + theme(axis.title=element_text(face="bold"),plot.title = element_text(face="bold",hjust=0.5)) 
+
+plot(graph_state_rate)
+
+graph_state_raw <- ggplot(state_conv_rate,aes(x=reorder(state,conv), y=conv, label=conv)) + geom_col(fill="salmon") + scale_y_continuous(expand = expand_scale(mult = c(0, 0.1), add = c(0, .1))) + labs(x="", y="Conversions") + geom_text(color="black",hjust=-0.2,size=3) + coord_flip() + theme_light() + theme(axis.title=element_text(face="bold"),plot.title = element_text(face="bold",hjust=0.5)) 
+
+plot(graph_state_raw)
+
+```
+
+## Audience
+
+- Users in these small cities may have the desire to travel but less disposable income to do so than people who live in large metropolitan areas.
+- These customers also live within several hours of a major airport and may have the most to gain from the award points and flight deals our program offers
+- Interestingly, Rapid City, Reno, and Bozeman are somewhat popular tourist areas for people on a budget. It is possible that people here are responding to ads for our program with their own businesses and customers in mind, in addition to themselves.
+
+
+```{r, echo=FALSE,cache=TRUE}
+
+audience_market_conv_rate <- sqldf("select audience_name, market, imp, conv, pct_conv
+from (
+select audience_name,i.market,count(i.user_id) as imp, count(c.user_id) as conv,cast(((cast(count(c.user_id) as float)/cast(count(i.user_id) as float))*100) as float) as pct_conv
+from imp_by_audience i
+left join (select user_id, ad_id, placement_id
+        from conversions) c on i.ad_id=c.ad_id and i.user_id=c.user_id and i.placement_id=c.placement_id
+group by 1,2
+order by 5 desc
+) a
+where conv>10
+and pct_conv>0
+and market not like 'NA'
+      ")
+
+graph_market_audience <- ggplot(audience_market_conv_rate,aes(x=market, y=pct_conv, fill=pct_conv, label=paste(round(pct_conv,2),"%",sep=""))) + geom_col(fill="cornflowerblue") + geom_text(color="black",hjust=-0.2,size=3) + scale_y_continuous(expand = expand_scale(mult = c(0, 0.1), add = c(0, .4))) + labs(x="", y="Conversion Rate (%)") + coord_flip() + theme_light() + theme(axis.title=element_text(face="bold"),plot.title = element_text(face="bold",hjust=0.5)) + facet_grid(cols=vars(audience_name))
+
+
+plot(graph_market_audience)
+
+```
+
